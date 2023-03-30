@@ -8,7 +8,7 @@ import sys
 import requests
 import numpy as np
 from collections import OrderedDict
-from . import datasets
+import datasets
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -153,6 +153,7 @@ class DenseNet(nn.Module):
 
         super(DenseNet, self).__init__()
 
+        self.block_config = block_config
         self.apply_sigmoid = apply_sigmoid
         self.weights = weights
 
@@ -236,29 +237,62 @@ class DenseNet(nn.Module):
             return "XRV-DenseNet121-{}".format(self.weights)
         else:
             return "XRV-DenseNet"
-
-    def features2(self, x):
+    
+    def forward(self, x):
+        
         x = fix_resolution(x, 224, self)
         warn_normalization(x)
-
         features = self.features(x)
-        out = F.relu(features, inplace=True)
-        out = F.adaptive_avg_pool2d(out, (1, 1)).view(features.size(0), -1)
-        return out
+        # print(self.features)
+        middle_features = []
+        feature = self.features[:4](x)
+        middle_features.append(feature)
+        # print("head=",self.features[:4])
+        # print("size=",feature.size())
+        
+        for i , num in enumerate(self.block_config):
+            
+            # print("block =",self.features[4+2*i])
+            # print("block2 =",self.features[5+2*i])
+            feature = self.features[4+2*i](feature)
+            # print("size1=",feature.size())
+            feature = self.features[5+2*i](feature)
+            middle_features.append(feature)
+            # print("size2=",feature.size())
 
-    def forward(self, x):
-        x = fix_resolution(x, 224, self)
 
-        features = self.features2(x)
-        out = self.classifier(features)
+        # out = F.relu(features, inplace=True)
+        # out = F.adaptive_avg_pool2d(out, (1, 1)).view(features.size(0), -1)
+        return middle_features
 
-        if hasattr(self, 'apply_sigmoid') and self.apply_sigmoid:
-            out = torch.sigmoid(out)
 
-        if hasattr(self, "op_threshs") and (self.op_threshs != None):
-            out = torch.sigmoid(out)
-            out = op_norm(out, self.op_threshs)
-        return out
+
+    # def features2(self, x):
+    #     x = fix_resolution(x, 224, self)
+    #     warn_normalization(x)
+
+    #     features = self.features(x)
+
+    #     out = F.relu(features, inplace=True)
+    #     out = F.adaptive_avg_pool2d(out, (1, 1)).view(features.size(0), -1)
+    #     return out  
+
+    # def forward(self, x):
+    #     x = fix_resolution(x, 224, self)
+    
+        
+    #     features = self.features_middle(x)
+    #     out = self.classifier(features)
+    #     exit(0)
+
+    #     # features = self.features2(x)
+    #     if hasattr(self, 'apply_sigmoid') and self.apply_sigmoid:
+    #         out = torch.sigmoid(out)
+
+    #     if hasattr(self, "op_threshs") and (self.op_threshs != None):
+    #         out = torch.sigmoid(out)
+    #         out = op_norm(out, self.op_threshs)
+    #     return out
 
 
 ##########################

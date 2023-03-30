@@ -17,7 +17,7 @@ import skimage.transform
 from skimage.io import imread
 import torch
 from torchvision import transforms
-from . import utils
+import utils
 
 default_pathologies = [
     'Atelectasis',

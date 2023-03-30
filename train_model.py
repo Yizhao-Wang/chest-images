@@ -3,6 +3,7 @@
 
 import os,sys
 sys.path.insert(0,"..")
+import os,sys,inspect
 from glob import glob
 from os.path import exists, join
 import matplotlib.pyplot as plt
@@ -15,29 +16,29 @@ import torchvision, torchvision.transforms
 import skimage.transform
 import sklearn, sklearn.model_selection
 
-import pickle
 import random
 import train_utils
-
 import torchxrayvision as xrv
 from newDesnet import Dense_Nonlocal
 from models import op_norm
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-f', type=str, default="", help='')
-parser.add_argument('dataset', type=str)
 parser.add_argument('weights_filename', type=str,)
-parser.add_argument('-seed', type=int, default=0, help='')
-parser.add_argument('-cuda', type=bool, default=True, help='')
-parser.add_argument('-batch_size', type=int, default=8, help='')
-parser.add_argument('-threads', type=int, default=4, help='')
-parser.add_argument('-mdtable', action='store_true', help='')
-parser.add_argument('--dataset_dir', type=str, default="/home/groups/akshaysc/joecohen/")
-parser.add_argument('--num_epochs', type=int, default=400, help='')
+parser.add_argument('-name', type=str)
 parser.add_argument('--output_dir', type=str, default="/scratch/users/joecohen/output/")
+parser.add_argument('--dataset', type=str, default="google")
+parser.add_argument('--dataset_dir', type=str, default="/home/groups/akshaysc/joecohen/")
+parser.add_argument('--model', type=str, default="resnet50")
+parser.add_argument('--seed', type=int, default=0, help='')
+parser.add_argument('--cuda', type=bool, default=True, help='')
+parser.add_argument('--num_epochs', type=int, default=400, help='')
+parser.add_argument('--batch_size', type=int, default=64, help='')
 parser.add_argument('--shuffle', type=bool, default=True, help='')
 parser.add_argument('--lr', type=float, default=0.001, help='')
-parser.add_argument('--taskweights', type=bool, default=False, help='')
+parser.add_argument('--threads', type=int, default=4, help='')
+parser.add_argument('--taskweights', type=bool, default=True, help='')
 parser.add_argument('--featurereg', type=bool, default=False, help='')
 parser.add_argument('--weightreg', type=bool, default=False, help='')
 parser.add_argument('--data_aug', type=bool, default=True, help='')
@@ -47,17 +48,27 @@ parser.add_argument('--data_aug_scale', type=float, default=0.15, help='')
 parser.add_argument('--label_concat', type=bool, default=False, help='')
 parser.add_argument('--label_concat_reg', type=bool, default=False, help='')
 parser.add_argument('--labelunion', type=bool, default=False, help='')
-parser.add_argument('--model', type=str, default="resnet50")
-parser.add_argument('-name', type=str)
-cfg = parser.parse_args()
-torch.autograd.set_detect_anomaly(True)
-data_aug = None
 
-transforms = torchvision.transforms.Compose([xrv.datasets.XRayCenterCrop(),xrv.datasets.XRayResizer(224)])####
+cfg = parser.parse_args()
+print(cfg)
+
+data_aug = None
+if cfg.data_aug:
+    data_aug = torchvision.transforms.Compose([
+        xrv.datasets.ToPILImage(),
+        torchvision.transforms.RandomAffine(cfg.data_aug_rot, 
+                                            translate=(cfg.data_aug_trans, cfg.data_aug_trans), 
+                                            scale=(1.0-cfg.data_aug_scale, 1.0+cfg.data_aug_scale)),
+        torchvision.transforms.ToTensor()
+    ])
+    print(data_aug)
+
+transforms = torchvision.transforms.Compose([xrv.datasets.XRayCenterCrop(),xrv.datasets.XRayResizer(512)])
 
 datas = []
 datas_names = []
 if "nih" in cfg.dataset:
+    #  change the file path
     dataset = xrv.datasets.NIH_Dataset(
         imgpath=cfg.dataset_dir + "/images-NIH-224", 
         transform=transforms, data_aug=data_aug, unique_patients=False, views=["PA","AP"])
@@ -113,26 +124,24 @@ if "vin" in cfg.dataset:
     dataset = xrv.datasets.VinBrain_Dataset(
         imgpath=cfg.dataset_dir + "vinbigdata-chest-xray-abnormalities-detection/train",
         csvpath=cfg.dataset_dir + "vinbigdata-chest-xray-abnormalities-detection/train.csv",
-        transform=transforms, data_aug=data_aug)
+        transform=transform, data_aug=data_aug)
     datas.append(dataset)
     datas_names.append("vin")
-    
-orj_dataset_pathologies = datas[0].pathologies
 
-# load model
-
-if cfg.weights_filename == "jfhealthcare":
-    model = xrv.baseline_models.jfhealthcare.DenseNet() 
-elif cfg.weights_filename == "chexpert":
-    model = xrv.baseline_models.chexpert.DenseNet(weights_zip="/home/users/joecohen/scratch/chexpert/chexpert_weights.zip")
-else:
-    model = Dense_Nonlocal(weights=cfg.weights_filename, apply_sigmoid=True,args=cfg)
-    model.op_threshs = None
 
 print("datas_names", datas_names)
 
-for d in datas:
-    xrv.datasets.relabel_dataset(model.pathologies, d)
+if cfg.labelunion:
+    newlabels = set()
+    for d in datas:
+        newlabels = newlabels.union(d.pathologies)
+    newlabels.remove("Support Devices")
+    print(list(newlabels))
+    for d in datas:
+        xrv.datasets.relabel_dataset(list(newlabels), d)
+else:
+    for d in datas:
+        xrv.datasets.relabel_dataset(xrv.datasets.default_pathologies, d)
 
 #cut out training sets
 train_datas = []
@@ -149,9 +158,6 @@ for i, dataset in enumerate(datas):
     train_dataset = xrv.datasets.SubsetDataset(dataset, train_inds)
     test_dataset = xrv.datasets.SubsetDataset(dataset, test_inds)
     
-    #disable data augs
-    # test_dataset.data_aug = None  #### change
-    
     train_datas.append(train_dataset)
     test_datas.append(test_dataset)
     
@@ -164,6 +170,7 @@ else:
     print("merge datasets")
     train_dataset = xrv.datasets.Merge_Dataset(train_datas)
     test_dataset = xrv.datasets.Merge_Dataset(test_datas)
+
 
 # Setting the seed
 np.random.seed(cfg.seed)
@@ -178,88 +185,46 @@ print("train_dataset.labels.shape", train_dataset.labels.shape)
 print("test_dataset.labels.shape", test_dataset.labels.shape)
 print("train_dataset",train_dataset)
 print("test_dataset",test_dataset)
+    
+# create models
+if "densenet" in cfg.model:
+    # model = xrv.models.DenseNet(num_classes=train_dataset.labels.shape[1], in_channels=1, 
+    #                             **xrv.models.get_densenet_params(cfg.model)) 
+    model = Dense_Nonlocal(weights=cfg.weights_filename, apply_sigmoid=True,args=cfg)
+    model.op_threshs = None
+elif "resnet101" in cfg.model:
+    model = torchvision.models.resnet101(num_classes=train_dataset.labels.shape[1], pretrained=False)
+    #patch for single channel
+    model.conv1 = torch.nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+    
+elif "resnet50" in cfg.model:
+    model = torchvision.models.resnet50(num_classes=train_dataset.labels.shape[1], pretrained=False)
+    #patch for single channel
+    model.conv1 = torch.nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+    
+elif "shufflenet_v2_x2_0" in cfg.model:
+    model = torchvision.models.shufflenet_v2_x2_0(num_classes=train_dataset.labels.shape[1], pretrained=False)
+    #patch for single channel
+    model.conv1[0] = torch.nn.Conv2d(1, 24, kernel_size=3, stride=2, padding=1, bias=False)
+elif "squeezenet1_1" in cfg.model:
+    model = torchvision.models.squeezenet1_1(num_classes=train_dataset.labels.shape[1], pretrained=False)
+    #patch for single channel
+    model.features[0] = torch.nn.Conv2d(1, 64, kernel_size=3, stride=2, padding=1, bias=False)
+else:
+    raise Exception("no model")
 
-#print(model)
-train_utils.train(model, train_dataset, cfg)###add
 
-test_loader = torch.utils.data.DataLoader(test_dataset,
-                                           batch_size=cfg.batch_size,
-                                           shuffle=False,
-                                           num_workers=cfg.threads, pin_memory=cfg.cuda)
+train_utils.train(model, train_dataset, cfg)
 
-filename = "results_" + os.path.basename(cfg.weights_filename).split(".")[0] + "_" + "-".join(datas_names) + ".pkl"
-print(filename)
-# if os.path.exists(filename):#####change
-#     print("Results already computed")
-#     results = pickle.load(open(filename, "br"))
-# else:
-print("Results are being computed")
-if cfg.cuda:
-    model = model.cuda()
-results = train_utils.valid_test_epoch("test", 0, model, "cuda", test_loader, torch.nn.BCEWithLogitsLoss(), limit=99999999)
-pickle.dump(results, open(filename, "bw"))
 
-print("Model pathologies:",model.pathologies)
-print("Dataset pathologies:",test_dataset.pathologies)
-
-perf_dict = {}
-all_threshs = []
-all_min = []
-all_max = []
-all_ppv80 = []
-for i, patho in enumerate(test_dataset.pathologies):
-    opt_thres = np.nan
-    opt_min = np.nan
-    opt_max = np.nan
-    ppv80_thres = np.nan
-    if (len(results[3][i]) > 0) and (len(np.unique(results[3][i])) == 2):
-        
-        #sigmoid
-        all_outputs = 1.0/(1.0 + np.exp(-results[2][i]))
-        
-        fpr, tpr, thres = sklearn.metrics.roc_curve(results[3][i], all_outputs)
-        pente = tpr - fpr
-        opt_thres = thres[np.argmax(pente)]
-        opt_min = all_outputs.min()
-        opt_max = all_outputs.max()
-        
-        ppv, recall, thres = sklearn.metrics.precision_recall_curve(results[3][i], all_outputs)
-        ppv80_thres_idx = np.where(ppv > 0.8)[0][0]
-        ppv80_thres = thres[ppv80_thres_idx-1]
-        
-        auc = sklearn.metrics.roc_auc_score(results[3][i], all_outputs)
-        
-        print(patho, auc)
-        perf_dict[patho] = str(round(auc,2))
-        
-    else:
-        perf_dict[patho] = "-"
-        
-    all_threshs.append(opt_thres)
-    all_min.append(opt_min)
-    all_max.append(opt_max)
-    all_ppv80.append(ppv80_thres)
-
-    
-print("pathologies",test_dataset.pathologies)
-    
-print("op_threshs",str(all_threshs).replace("nan","np.nan"))
-    
-print("min",str(all_min).replace("nan","np.nan"))
-    
-print("max",str(all_max).replace("nan","np.nan"))
-
-print("ppv80",str(all_ppv80).replace("nan","np.nan"))
-    
-    
-if cfg.mdtable:
-    print("|Model Name|" + "|".join(orj_dataset_pathologies) + "|")
-    print("|---|" + "|".join(("-"*len(orj_dataset_pathologies))) + "|")
-    
-    accs = [perf_dict[patho] if (patho in perf_dict) else "-" for patho in orj_dataset_pathologies]
-    print("|"+str(model)+"|" + "|".join(accs) + "|")
-    
 print("Done")
+# test_loader = torch.utils.data.DataLoader(test_dataset,
+#                                            batch_size=cfg.batch_size,
+#                                            shuffle=cfg.shuffle,
+#                                            num_workers=0, pin_memory=False)
+
+
+
 
 
 
