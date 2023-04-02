@@ -26,6 +26,7 @@ from models import op_norm
 parser = argparse.ArgumentParser()
 parser.add_argument('-f', type=str, default="", help='')
 parser.add_argument('weights_filename', type=str,)
+parser.add_argument('-mdtable', action='store_true', help='')
 parser.add_argument('-name', type=str)
 parser.add_argument('--output_dir', type=str, default="/scratch/users/joecohen/output/")
 parser.add_argument('--dataset', type=str, default="google")
@@ -188,9 +189,13 @@ print("test_dataset",test_dataset)
     
 # create models
 if "densenet" in cfg.model:
+    
     # model = xrv.models.DenseNet(num_classes=train_dataset.labels.shape[1], in_channels=1, 
     #                             **xrv.models.get_densenet_params(cfg.model)) 
-    model = Dense_Nonlocal(weights=cfg.weights_filename, apply_sigmoid=True,args=cfg)
+    # model = Dense_Nonlocal(num_classes=train_dataset.labels.shape[1],in_channels=1)
+    model = Dense_Nonlocal(weights=cfg.weights_filename, num_classes=train_dataset.labels.shape[1], in_channels=1,apply_sigmoid=True,args=cfg)
+    # model = xrv.models.DenseNet(num_classes=train_dataset.labels.shape[1], in_channels=1, 
+                                # weights="densenet121-res224-all")
     model.op_threshs = None
 elif "resnet101" in cfg.model:
     model = torchvision.models.resnet101(num_classes=train_dataset.labels.shape[1], pretrained=False)
@@ -214,17 +219,92 @@ else:
     raise Exception("no model")
 
 
-train_utils.train(model, train_dataset, cfg)
+# train_utils.train(model, train_dataset, cfg)
 
 
 print("Done")
-# test_loader = torch.utils.data.DataLoader(test_dataset,
-#                                            batch_size=cfg.batch_size,
-#                                            shuffle=cfg.shuffle,
-#                                            num_workers=0, pin_memory=False)
 
 
+#####
+test_loader = torch.utils.data.DataLoader(test_dataset,
+                                           batch_size=cfg.batch_size,
+                                           shuffle=cfg.shuffle,
+                                           num_workers=cfg.threads, pin_memory=cfg.cuda)
 
+
+filename = "results_" + os.path.basename(cfg.weights_filename).split(".")[0] + "_" + "-".join(datas_names) + ".pkl"
+print(filename)
+# if os.path.exists(filename):#####change
+#     print("Results already computed")
+#     results = pickle.load(open(filename, "br"))
+# else:
+print("Results are being computed")
+if cfg.cuda:
+    model = model.cuda()
+results = train_utils.valid_test_epoch("test", 0, model, "cuda", test_loader, torch.nn.BCEWithLogitsLoss(), limit=99999999)
+# pickle.dump(results, open(filename, "bw"))
+
+print("Model pathologies:",model.pathologies)
+print("Dataset pathologies:",test_dataset.pathologies)
+
+perf_dict = {}
+all_threshs = []
+all_min = []
+all_max = []
+all_ppv80 = []
+for i, patho in enumerate(test_dataset.pathologies):
+    opt_thres = np.nan
+    opt_min = np.nan
+    opt_max = np.nan
+    ppv80_thres = np.nan
+    if (len(results[3][i]) > 0) and (len(np.unique(results[3][i])) == 2):
+        
+        #sigmoid
+        all_outputs = 1.0/(1.0 + np.exp(-results[2][i]))
+        
+        fpr, tpr, thres = sklearn.metrics.roc_curve(results[3][i], all_outputs)
+        pente = tpr - fpr
+        opt_thres = thres[np.argmax(pente)]
+        opt_min = all_outputs.min()
+        opt_max = all_outputs.max()
+        
+        ppv, recall, thres = sklearn.metrics.precision_recall_curve(results[3][i], all_outputs)
+        ppv80_thres_idx = np.where(ppv > 0.8)[0][0]
+        ppv80_thres = thres[ppv80_thres_idx-1]
+        
+        auc = sklearn.metrics.roc_auc_score(results[3][i], all_outputs)
+        
+        print(patho, auc)
+        perf_dict[patho] = str(round(auc,2))
+        
+    else:
+        perf_dict[patho] = "-"
+        
+    all_threshs.append(opt_thres)
+    all_min.append(opt_min)
+    all_max.append(opt_max)
+    all_ppv80.append(ppv80_thres)
+
+    
+print("pathologies",test_dataset.pathologies)
+    
+print("op_threshs",str(all_threshs).replace("nan","np.nan"))
+    
+print("min",str(all_min).replace("nan","np.nan"))
+    
+print("max",str(all_max).replace("nan","np.nan"))
+
+print("ppv80",str(all_ppv80).replace("nan","np.nan"))
+    
+    
+if cfg.mdtable:
+    print("|Model Name|" + "|".join(orj_dataset_pathologies) + "|")
+    print("|---|" + "|".join(("-"*len(orj_dataset_pathologies))) + "|")
+    
+    accs = [perf_dict[patho] if (patho in perf_dict) else "-" for patho in orj_dataset_pathologies]
+    print("|"+str(model)+"|" + "|".join(accs) + "|")
+    
+print("Done")
 
 
 

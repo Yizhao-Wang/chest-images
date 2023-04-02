@@ -238,12 +238,12 @@ class DenseNet(nn.Module):
         else:
             return "XRV-DenseNet"
     
-    def forward(self, x):
+    def mid_feature(self, x):
         
         x = fix_resolution(x, 224, self)
         warn_normalization(x)
         features = self.features(x)
-        # print(self.features)
+        # print("ori_output=",self.features)
         middle_features = []
         feature = self.features[:4](x)
         middle_features.append(feature)
@@ -263,36 +263,37 @@ class DenseNet(nn.Module):
 
         # out = F.relu(features, inplace=True)
         # out = F.adaptive_avg_pool2d(out, (1, 1)).view(features.size(0), -1)
+        # print("feature4=",self.features[4])
+        # print("size=",middle_features[-1].size())
+        # print("modeloutput=",middle_features[-1][0][0])
+        # print("ori_output=",features[0][0])
         return middle_features
 
 
 
-    # def features2(self, x):
-    #     x = fix_resolution(x, 224, self)
-    #     warn_normalization(x)
+    def features2(self, x):
+        x = fix_resolution(x, 224, self)
+        warn_normalization(x)
 
-    #     features = self.features(x)
+        features = self.features(x)
 
-    #     out = F.relu(features, inplace=True)
-    #     out = F.adaptive_avg_pool2d(out, (1, 1)).view(features.size(0), -1)
-    #     return out  
+        out = F.relu(features, inplace=True)
+        out = F.adaptive_avg_pool2d(out, (1, 1)).view(features.size(0), -1)
+        return out  
 
-    # def forward(self, x):
-    #     x = fix_resolution(x, 224, self)
+    def forward(self, x):
+        x = fix_resolution(x, 224, self)
     
-        
-    #     features = self.features_middle(x)
-    #     out = self.classifier(features)
-    #     exit(0)
 
-    #     # features = self.features2(x)
-    #     if hasattr(self, 'apply_sigmoid') and self.apply_sigmoid:
-    #         out = torch.sigmoid(out)
+        features = self.features2(x)
+        out = self.classifier(features)
+        if hasattr(self, 'apply_sigmoid') and self.apply_sigmoid:
+            out = torch.sigmoid(out)
 
-    #     if hasattr(self, "op_threshs") and (self.op_threshs != None):
-    #         out = torch.sigmoid(out)
-    #         out = op_norm(out, self.op_threshs)
-    #     return out
+        if hasattr(self, "op_threshs") and (self.op_threshs != None):
+            out = torch.sigmoid(out)
+            out = op_norm(out, self.op_threshs)
+        return out
 
 
 ##########################

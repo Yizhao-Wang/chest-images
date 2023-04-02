@@ -21,7 +21,7 @@ import train_utils
 
 import torchxrayvision as xrv
 from newDesnet import Dense_Nonlocal
-from models import op_norm
+from models import op_norm, DenseNet
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-f', type=str, default="", help='')
@@ -53,8 +53,17 @@ cfg = parser.parse_args()
 torch.autograd.set_detect_anomaly(True)
 data_aug = None
 
-transforms = torchvision.transforms.Compose([xrv.datasets.XRayCenterCrop(),xrv.datasets.XRayResizer(224)])####
-
+transforms = torchvision.transforms.Compose([xrv.datasets.XRayCenterCrop(),xrv.datasets.XRayResizer(512)])####
+if cfg.data_aug:
+    data_aug = torchvision.transforms.Compose([
+        xrv.datasets.ToPILImage(),
+        torchvision.transforms.RandomAffine(cfg.data_aug_rot, 
+                                            translate=(cfg.data_aug_trans, cfg.data_aug_trans), 
+                                            scale=(1.0-cfg.data_aug_scale, 1.0+cfg.data_aug_scale)),
+        torchvision.transforms.ToTensor()
+    ])
+    print(data_aug)
+    
 datas = []
 datas_names = []
 if "nih" in cfg.dataset:
@@ -127,6 +136,9 @@ elif cfg.weights_filename == "chexpert":
     model = xrv.baseline_models.chexpert.DenseNet(weights_zip="/home/users/joecohen/scratch/chexpert/chexpert_weights.zip")
 else:
     model = Dense_Nonlocal(weights=cfg.weights_filename, apply_sigmoid=True,args=cfg)
+    # model = xrv.models.DenseNet(weights=cfg.weights_filename, apply_sigmoid=True)
+    # model = DenseNet(weights=cfg.weights_filename, apply_sigmoid=True)
+    
     model.op_threshs = None
 
 print("datas_names", datas_names)
@@ -180,7 +192,7 @@ print("train_dataset",train_dataset)
 print("test_dataset",test_dataset)
 
 #print(model)
-train_utils.train(model, train_dataset, cfg)###add
+# train_utils.train(model, train_dataset, cfg)###add
 
 test_loader = torch.utils.data.DataLoader(test_dataset,
                                            batch_size=cfg.batch_size,

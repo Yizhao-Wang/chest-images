@@ -82,23 +82,23 @@ def train(model, dataset, cfg):
     weights_for_best_validauc = None
     auc_test = None
     metrics = []
-    weights_files = glob(join(cfg.output_dir, f'{dataset_name}-e*.pt'))  # Find all weights files
-    if len(weights_files):
-        # Find most recent epoch
-        epochs = np.array(
-            [int(w[len(join(cfg.output_dir, f'{dataset_name}-e')):-len('.pt')].split('-')[0]) for w in weights_files])
-        start_epoch = epochs.max()
-        weights_file = [weights_files[i] for i in np.argwhere(epochs == np.amax(epochs)).flatten()][0]
-        model.load_state_dict(torch.load(weights_file).state_dict())
+    weights_files = glob(join(cfg.output_dir, f'{dataset_name}-89.pt'))  # Find all weights files###e* to 89
+    # if len(weights_files):
+    #     # Find most recent epoch
+    #     epochs = np.array(
+    #         [int(w[len(join(cfg.output_dir, f'{dataset_name}-e')):-len('.pt')].split('-')[0]) for w in weights_files])
+    #     start_epoch = epochs.max()
+    #     weights_file = [weights_files[i] for i in np.argwhere(epochs == np.amax(epochs)).flatten()][0]
+    #     model.load_state_dict(torch.load(weights_file).state_dict())
 
-        with open(join(cfg.output_dir, f'{dataset_name}-metrics.pkl'), 'rb') as f:
-            metrics = pickle.load(f)
+    #     with open(join(cfg.output_dir, f'{dataset_name}-metrics.pkl'), 'rb') as f:
+    #         metrics = pickle.load(f)
 
-        best_metric = metrics[-1]['best_metric']
-        weights_for_best_validauc = model.state_dict()
+    #     best_metric = metrics[-1]['best_metric']
+    #     weights_for_best_validauc = model.state_dict()
 
-        print("Resuming training at epoch {0}.".format(start_epoch))
-        print("Weights loaded: {0}".format(weights_file))
+    #     print("Resuming training at epoch {0}.".format(start_epoch))
+    #     print("Weights loaded: {0}".format(weights_file))
 
     model.to(device)
     
@@ -122,7 +122,7 @@ def train(model, dataset, cfg):
         if np.mean(auc_valid) > best_metric:
             best_metric = np.mean(auc_valid)
             weights_for_best_validauc = model.state_dict()
-            torch.save(model, join(cfg.output_dir, f'{dataset_name}-best.pt'))
+            # torch.save(model, join(cfg.output_dir, f'{dataset_name}-best.pt'))
             # only compute when we need to
 
         stat = {
@@ -137,7 +137,7 @@ def train(model, dataset, cfg):
         with open(join(cfg.output_dir, f'{dataset_name}-metrics.pkl'), 'wb') as f:
             pickle.dump(metrics, f)
 
-        torch.save(model, join(cfg.output_dir, f'{dataset_name}-e{epoch + 1}.pt'))
+        # torch.save(model, join(cfg.output_dir, f'{dataset_name}-e{epoch + 1}.pt'))
 
     return metrics, best_metric, weights_for_best_validauc
 

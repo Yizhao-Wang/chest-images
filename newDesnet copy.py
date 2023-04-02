@@ -1,4 +1,4 @@
-# test on training set
+
 
 import os
 import torch
@@ -85,30 +85,26 @@ class Dense_Nonlocal(torch.nn.Module):
         self.args = args
 
 
-        self.dense = DenseNet(weights=weights, apply_sigmoid=apply_sigmoid)
-        # self.model = DenseNet(num_classes=num_classes, in_channels=in_channels)
-        for param in self.dense.parameters():
-            param.requires_grad = False
-
-        self.pathologies = self.dense.pathologies ####
+        self.model = DenseNet(num_classes=num_classes, in_channels=in_channels)
+        # self.pathologies = self.model.pathologies ####
         # self.middle = MiddleFeatures()
         # self.model.register_forward_hook(self.middle)
         in_c = [64, 256, 512, 1024, 2048]
         self.encoder_sides = nn.ModuleList()
-        for i in range(len(self.dense.block_config)+1):
+        for i in range(len(self.model.block_config)+1):
             if i == 0:
                 self.encoder_sides.append(torch.nn.Sequential(
                     ocpX2(in_c[i]),
                     conv1x1(in_c[i], int(int(in_c[i])*2)),
                     nn.BatchNorm2d(int(int(in_c[i])*2)),
-                    nn.ReLU(inplace=True),
-                    nn.AvgPool2d(kernel_size=2, stride=2)
+                    nn.ReLU(inplace=True)
+                    # nn.AvgPool2d(kernel_size=2, stride=2)
                 ))
-            elif i == (len(self.dense.block_config)):
+            elif i == (len(self.model.block_config)):
                 self.encoder_sides.append(torch.nn.Sequential(
-                    ocpX2(in_c[i-1]),###change
+                    ocpX2(in_c[i]),
                     # conv1x1(in_c[i], in_c[i-1]),
-                    nn.BatchNorm2d(in_c[i-1]),###change
+                    nn.BatchNorm2d(in_c[i]),
                     nn.ReLU(inplace=True)
     
                 ))
@@ -116,42 +112,28 @@ class Dense_Nonlocal(torch.nn.Module):
                 self.encoder_sides.append(torch.nn.Sequential(
                     ocpX2(in_c[i]),
                     nn.BatchNorm2d(in_c[i]),
-                    nn.ReLU(inplace=True),
-                    nn.AvgPool2d(kernel_size=2, stride=2)
+                    nn.ReLU(inplace=True)
+                    # nn.AvgPool2d(kernel_size=2, stride=2)
                 ))
-        self.ori_end = torch.nn.Sequential(
-            nn.BatchNorm2d(2048),
-            nn.ReLU(inplace=True),
-            ocpX2(2048)
-        )
         # num_classes = len(self.pathologies)####
-        self.classifier = nn.Linear(in_c[len(self.dense.block_config)-1], num_classes)#
+        self.classifier = nn.Linear(in_c[len(self.model.block_config)], num_classes)#
         # self.classifier = nn.Linear(128, num_classes)#
-        # self.classifier = self.dense.classifier
         self._initialize_weights()
 
     def forward(self, inputs):
-        out11 = self.dense(inputs)
-        middle_features = self.dense.mid_feature(inputs)
-        nonlocal_feature = middle_features[-1]
-
-        # nonlocal_feature = self.encoder_sides[-1](middle_features[-1])
-        # nonlocal_feature = crop(nonlocal_feature, middle_features[-1])
-        # nonlocal_feature = torch.cat([nonlocal_feature, middle_features[-1]], 1)
-        # nonlocal_feature = self.ori_end(nonlocal_feature)
-
-
-        # nonlocal_feature = self.encoder_sides[0](middle_features[0])
+        middle_features = self.model(inputs)
+        # nonlocal_feature = middle_features[0]
+        nonlocal_feature = self.encoder_sides[0](middle_features[0])
         # print("nonlocal_feature=",nonlocal_feature.size())
         # print(self.encoder_sides)
-        # for i in range(len(middle_features)):
+        for i in range(len(middle_features)):
             
-        #     if i != 0:
-        #         nonlocal_feature = crop(nonlocal_feature, middle_features[i])
-        #         merge_feature = torch.cat([nonlocal_feature, middle_features[i]], 1)
-        #         # print("nonlocal_feature=",merge_feature.size())
-        #         # print("middl=",middle_features[i].size())
-        #         nonlocal_feature = self.encoder_sides[i](merge_feature)
+            if i != 0:
+                nonlocal_feature = crop(nonlocal_feature, middle_features[i])
+                merge_feature = torch.cat([nonlocal_feature, middle_features[i]], 1)
+                # print("nonlocal_feature=",merge_feature.size())
+                # print("middl=",middle_features[i].size())
+                nonlocal_feature = self.encoder_sides[i](merge_feature)
 
 
         # nonlocal_feature = crop(nonlocal_feature, middle_features[1])
@@ -164,19 +146,18 @@ class Dense_Nonlocal(torch.nn.Module):
         # out = F.relu(nonlocal_feature, inplace=True)
         out = F.adaptive_avg_pool2d(nonlocal_feature, (1, 1)).view(nonlocal_feature.size(0), -1)
         out = self.classifier(out)
-        # exit(0)
-        if hasattr(self.dense, 'apply_sigmoid') and self.dense.apply_sigmoid:
+        if hasattr(self.model, 'apply_sigmoid') and self.model.apply_sigmoid:
             out = torch.sigmoid(out)
 
-        if hasattr(self.dense, "op_threshs") and (self.dense.op_threshs != None):
+        if hasattr(self.model, "op_threshs") and (self.model.op_threshs != None):
             out = torch.sigmoid(out)
-            out = op_norm(out, self.dense.op_threshs)
+            out = op_norm(out, self.model.op_threshs)
 
-        
-        return out11
+
+        return out
 
     def _initialize_weights(self):
-        
+
         for m in self.modules():
             if isinstance(m, nn.Conv2d):                  
                 nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
